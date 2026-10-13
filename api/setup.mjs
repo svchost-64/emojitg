@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { diagnosticoSeguro, solicitarTelegram } from '../telegram-api.mjs';
 
 function coincide(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
@@ -27,17 +28,20 @@ export default async function handler(req, res) {
 
   const webhookUrl = `https://${host.replace(/:443$/, '')}/api/webhook`;
   try {
-    const respuesta = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({ url: webhookUrl, secret_token: key, allowed_updates: ['message', 'edited_message'] })
+    const { data, status } = await solicitarTelegram(token, 'setWebhook', {
+      url: webhookUrl,
+      secret_token: key,
+      allowed_updates: ['message', 'edited_message']
     });
-    const data = await respuesta.json();
-    if (!data.ok) return res.status(502).json({ ok: false, error: data.description || 'Telegram rechazó el webhook' });
+    if (!data.ok) return res.status(502).json({
+      ok: false,
+      error: data.description || 'Telegram rechazó el webhook',
+      telegram_status: status
+    });
     return res.status(200).json({ ok: true, mensaje: 'Webhook de Telegram activado', webhook: webhookUrl });
   } catch (error) {
-    console.error('No se pudo activar el webhook:', error);
-    return res.status(502).json({ ok: false, error: 'Falló la conexión con Telegram' });
+    const codigo = diagnosticoSeguro(error);
+    console.error('Error conectando con Telegram al activar webhook:', codigo);
+    return res.status(502).json({ ok: false, error: 'Falló la conexión con Telegram', detalle: codigo });
   }
 }
