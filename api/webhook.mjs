@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { extraerEmojis, formatearEmoji } from '../emoji.mjs';
+import { diagnosticoSeguro, solicitarTelegram } from '../telegram-api.mjs';
 
 const token = process.env.BOT_TOKEN?.trim();
 const secret = process.env.SETUP_KEY?.trim();
@@ -13,25 +14,18 @@ function coincide(a, b) {
 }
 
 async function enviar(chatId, text, messageId, parseMode) {
-  const respuesta = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(8000),
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      ...(parseMode ? { parse_mode: parseMode } : {}),
-      reply_parameters: { message_id: messageId, allow_sending_without_reply: true }
-    })
+  const { data, status } = await solicitarTelegram(token, 'sendMessage', {
+    chat_id: chatId,
+    text,
+    ...(parseMode ? { parse_mode: parseMode } : {}),
+    reply_parameters: { message_id: messageId, allow_sending_without_reply: true }
   });
-  const resultado = await respuesta.json();
-  if (!resultado.ok) throw new Error(`Telegram: ${resultado.description || respuesta.status}`);
+  if (!data.ok) throw Object.assign(new Error(`Telegram rechazó el envío (${status})`), { code: `TELEGRAM_HTTP_${status}` });
 }
 
 export default async function handler(req, res) {
   if (req.method === 'GET') return res.status(200).json({ ok: true, service: 'Premium Emoji ID Bot', method: 'webhook' });
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
-
   if (!token || !secret) return res.status(503).json({ ok: false, error: 'Configuración incompleta' });
   if (!coincide(req.headers['x-telegram-bot-api-secret-token'], secret)) {
     return res.status(401).json({ ok: false, error: 'No autorizado' });
@@ -46,7 +40,6 @@ export default async function handler(req, res) {
     const chatId = message.chat.id;
     const messageId = message.message_id;
     const texto = message.text || '';
-
     if (/^\/(start|help|ayuda)(?:@\w+)?(?:\s|$)/i.test(texto)) {
       await enviar(chatId, '👋 Envíame uno o varios emojis Premium para obtener sus IDs. También acepto stickers de tipo emoji personalizado. Usa /miid para ver tu ID de Telegram.', messageId);
     } else if (/^\/miid(?:@\w+)?(?:\s|$)/i.test(texto)) {
@@ -63,7 +56,7 @@ export default async function handler(req, res) {
     }
     return res.status(200).json({ ok: true });
   } catch (error) {
-    console.error('Error al procesar el webhook:', error);
+    console.error('Error al procesar el webhook:', diagnosticoSeguro(error));
     return res.status(500).json({ ok: false, error: 'No se pudo procesar el mensaje' });
   }
 }
